@@ -1,0 +1,108 @@
+---
+title: "Untitled"
+format: pdf
+editor: visual
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(
+  tidyverse,
+  openalexR,
+  readxl,
+  rvest,
+  arrow
+)
+```
+
+## Step 1: Find Most cited journal
+
+SCOPUS
+
+Scraping Scopus Categories
+
+```{r}
+read_html("https://service.elsevier.com/app/answers/detail/a_id/15181/supporthub/scopus/") %>%
+  html_elements(xpath="//td | //th") %>%
+  html_text() %>%
+  .[4:1005] -> Scopus_codes
+
+tibble(
+  Code = Scopus_codes[seq(1, length(Scopus_codes), by = 3)],
+  Subject = Scopus_codes[seq(2, length(Scopus_codes), by = 3)],
+  Field = Scopus_codes[seq(3, length(Scopus_codes), by = 3)]
+  ) %>%
+  mutate(
+  Area = str_sub(Code, start = 1, end = 2) %>%
+    case_match(
+      "10" ~ "General",
+      "11" ~ "Agricultural and Biological Sciences",
+      "12" ~ "Arts and Humanities",
+      "13" ~ "Biochemistry, Genetics and Molecular Biology",
+      "14" ~ "Business, Management and Accounting",
+      "15" ~ "Chemical Engineering",
+      "16" ~ "Chemistry",
+      "17" ~ "Computer Science",
+      "18" ~ "Decision Sciences",
+      "19" ~ "Earth and Planetary Sciences",
+      "20" ~ "Economics, Econometrics and Finance",
+      "21" ~ "Energy",
+      "22" ~ "Engineering",
+      "23" ~ "Environmental Science",
+      "24" ~ "Immunology and Microbiology",
+      "25" ~ "Materials Science",
+      "26" ~ "Mathematics",
+      "27" ~ "Medicine",
+      "28" ~ "Neuroscience",
+      "29" ~ "Nursing",
+      "30" ~ "Pharmacology, Toxicology and Pharmaceutics",
+      "31" ~ "Physics and Astronomy",
+      "32" ~ "Psychology",
+      "33" ~ "Social Sciences",
+      "34" ~ "Veterinary",
+      "35" ~ "Dentistry",
+      "36" ~ "Health Professions"
+  )
+  ) -> Scopus_codes
+
+Scopus_db <- read_excel("Scopus_db.xlsx") %>%
+  transmute(ISSN = `Print-ISSN`,
+            eISSN = `E-ISSN`,
+            Active = `Active or Inactive`,
+            Type = `Source Type`,
+            Scopus_Citescore = CiteScore %>% as.numeric(),
+            Codes = `All Science Journal Classification Codes (ASJC)` %>%
+              str_sub(end = -2)
+) %>%
+  filter(Type == "Journal",
+         Active == "Active"
+         )
+
+Scopus_db %>%
+  pivot_longer(1:2,
+               values_to = "ISSN") %>%
+  distinct(ISSN, .keep_all = T) %>%
+  select(-name) %>%
+  filter(!ISSN %>% is.na()) %>%
+  mutate(Scopus_Area =
+           str_replace_all(Codes,
+                           setNames(Scopus_codes$Area, Scopus_codes$Code)),
+         Scopus_Area =
+           map_chr(
+             str_split(Scopus_Area, "; "),
+             ~ str_c(unique(.x),
+                     collapse = "; "))) %>%
+  transmute(main_issn = ISSN,
+            Scopus_Area,
+            Scopus_Citescore) %>%
+  separate_rows(Scopus_Area, sep = "; ") -> Scopus_db
+
+Scopus_db %>%
+  arrange(Scopus_Area,
+          -Scopus_Citescore) %>%
+  group_by(Scopus_Area) %>%
+  slice_head(n = 10) %>%
+  .[14:nrow(.),] -> j_selection
+
+j_selection %>%
+  count()
+```
