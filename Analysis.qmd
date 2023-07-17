@@ -65,8 +65,9 @@ tibble(
   ) -> Scopus_codes
 
 Scopus_db <- read_excel("Scopus_db.xlsx") %>%
-  transmute(ISSN = `Print-ISSN`,
-            eISSN = `E-ISSN`,
+  transmute(ISSN = `Print-ISSN` %>% as.character(),
+            eISSN = `E-ISSN` %>% as.character(),
+            Title,
             Active = `Active or Inactive`,
             Type = `Source Type`,
             Scopus_Citescore = CiteScore %>% as.numeric(),
@@ -75,14 +76,7 @@ Scopus_db <- read_excel("Scopus_db.xlsx") %>%
 ) %>%
   filter(Type == "Journal",
          Active == "Active"
-         )
-
-Scopus_db %>%
-  pivot_longer(1:2,
-               values_to = "ISSN") %>%
-  distinct(ISSN, .keep_all = T) %>%
-  select(-name) %>%
-  filter(!ISSN %>% is.na()) %>%
+         ) %>%
   mutate(Scopus_Area =
            str_replace_all(Codes,
                            setNames(Scopus_codes$Area, Scopus_codes$Code)),
@@ -91,18 +85,42 @@ Scopus_db %>%
              str_split(Scopus_Area, "; "),
              ~ str_c(unique(.x),
                      collapse = "; "))) %>%
-  transmute(main_issn = ISSN,
-            Scopus_Area,
-            Scopus_Citescore) %>%
   separate_rows(Scopus_Area, sep = "; ") -> Scopus_db
+
 
 Scopus_db %>%
   arrange(Scopus_Area,
           -Scopus_Citescore) %>%
   group_by(Scopus_Area) %>%
   slice_head(n = 10) %>%
-  .[14:nrow(.),] -> j_selection
+  .[9:nrow(.),] %>%
+  pivot_longer(1:2,
+               values_to = "ISSN") %>%
+  distinct(ISSN, .keep_all = T) %>%
+    select(-name) %>%
+  filter(!ISSN %>% is.na()) %>%
+  mutate(ISSN = ISSN %>% str_replace("(.{4})(.)",
+                                     "\\1-\\2")) -> j_selection
 
-j_selection %>%
-  count()
+```
+
+## Retrieve bibliometric data by OpenAlex
+
+```{r}
+openalexR::oa_fetch(
+  entity = "venues",
+  issn = j_selection %>%
+    pull(ISSN) %>% unique()
+) -> j_sample
+
+j_sample %>%
+  arrange(-works_count) %>% .[2,] -> p
+
+
+openalexR::oa_fetch(
+  entity = "works",
+  primary_location.source.issn = j_selection %>%
+    pull(ISSN) %>% unique(),
+  publication_year = c(2012,2017)
+) -> sample
 ```
