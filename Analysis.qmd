@@ -119,8 +119,100 @@ j_sample %>%
 
 openalexR::oa_fetch(
   entity = "works",
-  primary_location.source.issn = j_selection %>%
-    pull(ISSN) %>% unique(),
+  primary_location.source.id = j_sample %>%
+    pull(id) %>% unique(),
   publication_year = c(2012,2017)
 ) -> sample
+
+sample %>%
+  distinct(id, .keep_all = T) -> sample
+```
+
+Micro-sample
+
+```{r}
+j_sample %>%
+  arrange(-works_count) %>%
+  head(5) %>%
+  pull(id) %>%
+  openalexR::oa_fetch(
+  entity = "works",
+  primary_location.source.id = .,
+  publication_year = c(2012,2017)
+) -> micro_sample
+```
+
+Pre processing
+
+```{r}
+
+sample %>%
+  transmute(
+    id,
+    doi,
+    Title = display_name,
+    Journal = so,
+    publication_date,
+    publication_year,
+    cited_by_count,
+    counts_by_year,
+    len = as.integer(last_page) - as.integer(first_page),
+    len = ifelse(len < 0, 0, len),
+    concepts
+  ) %>%
+  filter(!Title %>% is.na()) %>%
+  filter(!Title %>% str_detect("Errat|Editor")) -> framed_sample
+
+```
+
+Hypothesis: we need to clean mono-page papers
+
+```{r}
+
+framed_sample %>%
+  mutate(very_short = ifelse(len < 2, 1,0)) %>%
+  summarise(
+    n = n(),
+    len = median(len),
+    IF = median(cited_by_count),
+            .by = very_short)
+
+framed_sample %>%
+  mutate(class_lenght =
+           case_when(
+             len < 2 ~ "micro",
+             len %>% between(2,7) ~ "small",
+             len > 7 ~ "big",
+             T ~ "noinfo") %>%
+           factor(levels = c("noinfo","micro","small","big"), ordered = T)
+         ) %>%
+  group_by(class_lenght) %>%
+  summarise(
+    n = n(),
+    median_len = median(len+1),
+    median_counts = median(cited_by_count),
+    max_counts = max(cited_by_count)
+    ) %>%
+  gt::gt() %>%
+  gt::gtsave("table.png")
+
+```
+
+Calculating impact
+
+```{framed_sample %>%}
+  unnest(counts_by_year,
+         names_sep = "_") %>%
+  summarize(
+    FiveYear_Impact = sum(case_when(
+      publication_year == 2017 ~ sum(counts_by_year_cited_by_count[
+        between(counts_by_year_year, 2018, 2022)],
+        na.rm = TRUE),
+      publication_year == 2012 ~ sum(counts_by_year_cited_by_count[
+        between(counts_by_year_year, 2013, 2017)],
+        na.rm = TRUE))
+    ),
+    .by = id
+  ) %>%
+    right_join(framed_sample) -> framed_sample
 ```
